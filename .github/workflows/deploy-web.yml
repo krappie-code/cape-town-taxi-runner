@@ -24,26 +24,24 @@ jobs:
 
       - name: Setup export templates
         run: |
-          # Find where templates actually are in this container
           GODOT_VERSION="4.4.stable"
-          TEMPLATE_DIR="/github/home/.local/share/godot/export_templates/${GODOT_VERSION}"
+          # Godot looks in $HOME/.local/share/godot/export_templates/
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}"
           mkdir -p "${TEMPLATE_DIR}"
-          # barichello/godot-ci stores templates in /root
+          # Copy from /root where barichello/godot-ci installs them
           if [ -d "/root/.local/share/godot/export_templates/${GODOT_VERSION}" ]; then
-            cp -r /root/.local/share/godot/export_templates/${GODOT_VERSION}/* "${TEMPLATE_DIR}/" 2>/dev/null || true
+            cp -r /root/.local/share/godot/export_templates/${GODOT_VERSION}/* "${TEMPLATE_DIR}/"
           fi
-          # Also try finding them anywhere
-          find / -name "web_*release*" -o -name "web_*debug*" 2>/dev/null | head -10 || true
-          ls -la "${TEMPLATE_DIR}/" 2>/dev/null || echo "Template dir empty"
-          # If templates missing, download them
-          if [ ! -f "${TEMPLATE_DIR}/web_nothreads_release.zip" ]; then
+          # Verify
+          ls "${TEMPLATE_DIR}/web_nothreads_release.zip" && echo "Templates ready" || {
             echo "Downloading export templates..."
-            DOWNLOAD_URL="https://github.com/godotengine/godot/releases/download/4.4-stable/Godot_v4.4-stable_export_templates.tpz"
-            curl -fsSL "${DOWNLOAD_URL}" -o /tmp/templates.tpz
+            curl -fsSL "https://github.com/godotengine/godot/releases/download/4.4-stable/Godot_v4.4-stable_export_templates.tpz" -o /tmp/templates.tpz
             cd /tmp && unzip -o templates.tpz
             cp -r /tmp/templates/* "${TEMPLATE_DIR}/"
-            ls -la "${TEMPLATE_DIR}/"
-          fi
+          }
+          echo "HOME=$HOME"
+          echo "Template dir: ${TEMPLATE_DIR}"
+          ls "${TEMPLATE_DIR}/web_nothreads_release.zip"
 
       - name: Import project
         run: |
