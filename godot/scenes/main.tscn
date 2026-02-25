@@ -1,0 +1,60 @@
+[gd_scene load_steps=7 format=3 uid="uid://main001"]
+
+[ext_resource type="Script" path="res://scenes/main.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://road001" path="res://scenes/road.tscn" id="2"]
+[ext_resource type="PackedScene" uid="uid://player001" path="res://scenes/player.tscn" id="3"]
+[ext_resource type="PackedScene" uid="uid://hud001" path="res://scenes/hud.tscn" id="4"]
+[ext_resource type="PackedScene" uid="uid://menu001" path="res://scenes/menu.tscn" id="5"]
+
+[sub_resource type="Environment" id="1"]
+background_mode = 3
+background_color = Color(0.529, 0.808, 0.922, 1)
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+
+[node name="ParallaxBackground" type="ParallaxBackground" parent="."]
+
+[node name="SkyLayer" type="ParallaxLayer" parent="ParallaxBackground"]
+motion_scale = Vector2(0.1, 0.1)
+
+[node name="Sky" type="ColorRect" parent="ParallaxBackground/SkyLayer"]
+offset_left = -1000.0
+offset_top = -3000.0
+offset_right = 2000.0
+offset_bottom = 0.0
+color = Color(0.529, 0.808, 0.922, 1)
+
+[node name="MountainLayer" type="ParallaxLayer" parent="ParallaxBackground"]
+motion_scale = Vector2(0.2, 0.15)
+
+[node name="TableMountain" type="Polygon2D" parent="ParallaxBackground/MountainLayer"]
+polygon = PackedVector2Array(-600, 400, -400, 100, -200, 80, -50, 85, 0, 80, 200, 80, 350, 85, 500, 100, 700, 400)
+color = Color(0.25, 0.3, 0.35, 0.6)
+
+[node name="DevilsPeak" type="Polygon2D" parent="ParallaxBackground/MountainLayer"]
+polygon = PackedVector2Array(-700, 400, -500, 150, -350, 80, -200, 120, -100, 400)
+color = Color(0.2, 0.25, 0.3, 0.5)
+
+[node name="BuildingLayer" type="ParallaxLayer" parent="ParallaxBackground"]
+motion_scale = Vector2(0.4, 0.3)
+
+[node name="Buildings" type="Polygon2D" parent="ParallaxBackground/BuildingLayer"]
+polygon = PackedVector2Array(-500, 500, -500, 300, -400, 300, -400, 350, -300, 350, -300, 280, -200, 280, -200, 320, -100, 320, -100, 260, 0, 260, 0, 340, 100, 340, 100, 290, 200, 290, 200, 360, 300, 360, 300, 310, 400, 310, 400, 500)
+color = Color(0.35, 0.38, 0.42, 0.5)
+
+[node name="Road" parent="." instance=ExtResource("2")]
+position = Vector2(540, 800)
+
+[node name="Player" parent="." instance=ExtResource("3")]
+position = Vector2(540, 1400)
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(540, 960)
+
+[node name="HUD" parent="." instance=ExtResource("4")]
+
+[node name="Menu" parent="." instance=ExtResource("5")]
+
+[node name="ObstacleTimer" type="Timer" parent="."]
+wait_time = 1.5

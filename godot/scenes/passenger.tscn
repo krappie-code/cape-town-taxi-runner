@@ -1,0 +1,23 @@
+[gd_scene load_steps=3 format=3 uid="uid://pass001"]
+
+[ext_resource type="Script" path="res://scenes/passenger.gd" id="1"]
+
+[sub_resource type="RectangleShape2D" id="1"]
+size = Vector2(30, 30)
+
+[node name="Passenger" type="Area2D"]
+collision_layer = 4
+collision_mask = 1
+script = ExtResource("1")
+
+[node name="Body" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(0, -18, 15, 0, 0, 18, -15, 0)
+color = Color(0.2, 0.85, 0.3, 1)
+
+[node name="Indicator" type="Polygon2D" parent="."]
+position = Vector2(0, -45)
+polygon = PackedVector2Array(0, -8, 6, 0, 0, 8, -6, 0)
+color = Color(1, 1, 0.2, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("1")
