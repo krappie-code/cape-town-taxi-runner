@@ -24,10 +24,26 @@ jobs:
 
       - name: Setup export templates
         run: |
-          mkdir -p /root/.local/share/godot/export_templates/4.4.stable
-          mv /root/.local/share/godot/export_templates/4.4.stable.mono /root/.local/share/godot/export_templates/4.4.stable 2>/dev/null || true
-          # Templates come pre-installed in barichello/godot-ci
-          ls /root/.local/share/godot/export_templates/ || true
+          # Find where templates actually are in this container
+          GODOT_VERSION="4.4.stable"
+          TEMPLATE_DIR="/github/home/.local/share/godot/export_templates/${GODOT_VERSION}"
+          mkdir -p "${TEMPLATE_DIR}"
+          # barichello/godot-ci stores templates in /root
+          if [ -d "/root/.local/share/godot/export_templates/${GODOT_VERSION}" ]; then
+            cp -r /root/.local/share/godot/export_templates/${GODOT_VERSION}/* "${TEMPLATE_DIR}/" 2>/dev/null || true
+          fi
+          # Also try finding them anywhere
+          find / -name "web_*release*" -o -name "web_*debug*" 2>/dev/null | head -10 || true
+          ls -la "${TEMPLATE_DIR}/" 2>/dev/null || echo "Template dir empty"
+          # If templates missing, download them
+          if [ ! -f "${TEMPLATE_DIR}/web_nothreads_release.zip" ]; then
+            echo "Downloading export templates..."
+            DOWNLOAD_URL="https://github.com/godotengine/godot/releases/download/4.4-stable/Godot_v4.4-stable_export_templates.tpz"
+            curl -fsSL "${DOWNLOAD_URL}" -o /tmp/templates.tpz
+            cd /tmp && unzip -o templates.tpz
+            cp -r /tmp/templates/* "${TEMPLATE_DIR}/"
+            ls -la "${TEMPLATE_DIR}/"
+          fi
 
       - name: Import project
         run: |
