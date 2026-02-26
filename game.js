@@ -12,13 +12,23 @@ const DESTINATIONS = [
   'Camps Bay', 'Langa', 'Gugulethu', 'Athlone', 'Woodstock'
 ];
 
+const CAR_COLORS = [
+  { left: '#cc2222', right: '#991818', top: '#ee3333' },
+  { left: '#2255cc', right: '#183999', top: '#3366ee' },
+  { left: '#dddddd', right: '#aaaaaa', top: '#ffffff' },
+  { left: '#228833', right: '#185522', top: '#33aa44' },
+  { left: '#222222', right: '#111111', top: '#333333' },
+  { left: '#cc8822', right: '#996618', top: '#eeaa33' },
+];
+
 // Colors — Cape Town palette
 const C = {
   sky1: '#4a90d9', sky2: '#87ceeb', sky3: '#ffd89b',
-  mountain: '#2d4a3e', mountainLight: '#3d6a5e',
+  mountain: '#3a5a7a', mountainLight: '#5a7a9a', mountainDark: '#2a4060',
   city: '#3a3a5c', cityLight: '#5a5a7c',
   road: '#4a4a5a', roadLight: '#5a5a6a', roadLine: '#f0c040',
-  taxi: '#f0b030', taxiDark: '#c08020', taxiLight: '#ffe080',
+  taxi: '#f0f0f0', taxiDark: '#1a5a9a', taxiLight: '#d0d8e0',
+  taxiBlue: '#1a5a9a', taxiWhite: '#f0f0f0',
   ocean: '#2a6a9a', sand: '#e8d5a0', fynbos: '#5a8a50',
   gold: '#f0c040', red: '#e04040', blue: '#4080e0',
   shield: '#40c0f0', boost: '#f06040',
@@ -44,6 +54,11 @@ class Game {
     this.shakeX = 0;
     this.shakeY = 0;
     this.shakeIntensity = 0;
+    this.shakeDuration = 0;
+
+    // Collision flash
+    this.flashAlpha = 0;
+    this.freezeTimer = 0;
 
     // Iso config (recalculated on resize)
     this.isoAngle = 0.46; // radians
@@ -166,7 +181,7 @@ class Game {
 
       const absDx = Math.abs(dx);
       const absDy = Math.abs(dy);
-      if (absDx < 20 && absDy < 20 && elapsed < 300) return; // tap ignored during play
+      if (absDx < 20 && absDy < 20 && elapsed < 300) return;
       if (absDy > absDx && dy < -30) { this.jump(); return; }
       if (absDx > 30) this.changeLane(dx > 0 ? 1 : -1);
     }, { passive: false });
@@ -216,11 +231,13 @@ class Game {
     this.passengerTimer = 0;
     this.powerupTimer = 0;
     this.shakeIntensity = 0;
+    this.shakeDuration = 0;
+    this.flashAlpha = 0;
+    this.freezeTimer = 0;
     this.initTiles();
   }
 
   // ─── ISO HELPERS ───
-  // Convert lane + depth (0=horizon, 1=player) to screen coords
   isoToScreen(lane, depth) {
     const perspective = 0.3 + depth * 0.7;
     const rw = this.roadWidth * perspective;
@@ -235,6 +252,14 @@ class Game {
     this.dt = Math.min((timestamp - this.lastTime) / 1000, 0.05);
     this.lastTime = timestamp;
     this.time = timestamp / 1000;
+
+    // Freeze frame on collision
+    if (this.freezeTimer > 0) {
+      this.freezeTimer -= this.dt;
+      this.draw();
+      requestAnimationFrame(t => this.loop(t));
+      return;
+    }
 
     this.update();
     this.draw();
@@ -301,11 +326,13 @@ class Game {
     if (this.obstacleTimer <= 0) {
       this.obstacleTimer = 0.8 + Math.random() * 1.5 / (spd * 0.3);
       const type = Math.random();
+      const colorSet = CAR_COLORS[Math.floor(Math.random() * CAR_COLORS.length)];
       this.obstacles.push({
         lane: Math.floor(Math.random() * LANE_COUNT),
         z: 30,
         type: type < 0.4 ? 'car' : type < 0.7 ? 'pothole' : 'vendor',
-        color: `hsl(${Math.random() * 360},60%,50%)`,
+        colorSet,
+        color: colorSet.left,
         active: true,
       });
     }
@@ -350,13 +377,17 @@ class Game {
               this.shieldTimer = 0;
               ob.active = false;
               this.spawnSparks(ob.lane, depth);
-              this.shakeIntensity = 5;
+              this.shakeIntensity = 12;
+              this.shakeDuration = 0.3;
               continue;
             }
             // Collision!
             ob.active = false;
-            this.spawnSparks(ob.lane, depth);
-            this.shakeIntensity = 15;
+            this.spawnCollisionParticles(ob.lane, depth);
+            this.shakeIntensity = 35;
+            this.shakeDuration = 0.5;
+            this.flashAlpha = 0.6;
+            this.freezeTimer = 0.08; // 80ms freeze frame
             this.state = 'gameOver';
             this.stateAlpha = 0;
             return;
@@ -378,7 +409,6 @@ class Game {
             p.active = false;
             this.passengers++;
             this.score += 50;
-            // Small celebration particles
             for (let i = 0; i < 5; i++) {
               this.particles.push({
                 x: this.w / 2 + (p.lane - 1) * this.laneWidth * 0.6,
@@ -448,6 +478,7 @@ class Game {
     for (const p of this.particles) {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
+      p.vy += 200 * dt; // gravity
       p.life -= dt;
     }
     this.particles = this.particles.filter(p => p.life > 0);
@@ -458,11 +489,15 @@ class Game {
     // Display score lerp
     this.displayScore += (this.score - this.displayScore) * Math.min(1, dt * 5);
 
+    // Flash decay
+    if (this.flashAlpha > 0) this.flashAlpha -= dt * 4;
+
     // Shake decay
-    this.shakeIntensity *= Math.max(0, 1 - dt * 8);
-    if (this.shakeIntensity > 0.1) {
+    if (this.shakeDuration > 0) {
+      this.shakeDuration -= dt;
       this.shakeX = (Math.random() - 0.5) * this.shakeIntensity;
       this.shakeY = (Math.random() - 0.5) * this.shakeIntensity;
+      this.shakeIntensity *= Math.max(0, 1 - dt * 4);
     } else {
       this.shakeX = this.shakeY = 0;
       this.shakeIntensity = 0;
@@ -484,6 +519,24 @@ class Game {
     }
   }
 
+  spawnCollisionParticles(lane, depth) {
+    const { x, y } = this.isoToScreen(lane, depth);
+    // Many more, bigger particles for impactful collision
+    for (let i = 0; i < 30; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 100 + Math.random() * 400;
+      this.particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 150,
+        life: 0.5 + Math.random() * 0.6,
+        maxLife: 1.1,
+        color: [C.spark, C.red, '#ff6600', '#ffcc00', '#ffffff'][Math.floor(Math.random() * 5)],
+        size: 3 + Math.random() * 7,
+      });
+    }
+  }
+
   // ─── DRAW ───
   draw() {
     const { cx, w, h } = this;
@@ -497,6 +550,13 @@ class Game {
     this.drawGameObjects();
     this.drawParticles();
     this.drawSpeedLines();
+
+    // Red flash overlay on collision
+    if (this.flashAlpha > 0) {
+      cx.fillStyle = `rgba(200,0,0,${Math.max(0, this.flashAlpha)})`;
+      cx.fillRect(-50, -50, w + 100, h + 100);
+    }
+
     this.drawHUD();
 
     if (this.state === 'menu') this.drawMenu();
@@ -523,37 +583,83 @@ class Game {
     cx.fillRect(0, this.horizonY - 30, w, 50);
   }
 
-  // ─── MOUNTAINS ───
+  // ─── MOUNTAINS (Table Mountain with flat top, Devil's Peak, Lion's Head) ───
   drawMountains() {
     const { cx, w, h } = this;
     const by = this.horizonY;
     const scroll = this.bgScroll[0] * 0.02;
+    const s = scroll % 20;
 
     cx.save();
-    // Table Mountain — flat top
-    cx.fillStyle = C.mountain;
+
+    // Lion's Head — rounded bump on the left
+    cx.fillStyle = '#4a6a8a';
     cx.beginPath();
     cx.moveTo(-50, by);
-    cx.lineTo(w * 0.15 - scroll % 20, by - h * 0.18);
-    cx.lineTo(w * 0.35 - scroll % 20, by - h * 0.2);
-    cx.lineTo(w * 0.55 - scroll % 20, by - h * 0.2);
-    cx.lineTo(w * 0.65 - scroll % 20, by - h * 0.17);
-    // Devil's Peak
-    cx.lineTo(w * 0.78 - scroll % 20, by - h * 0.22);
-    cx.lineTo(w * 0.88 - scroll % 20, by - h * 0.12);
-    cx.lineTo(w + 50, by);
+    cx.quadraticCurveTo(w * 0.06 - s, by - h * 0.13, w * 0.12 - s, by - h * 0.16);
+    cx.quadraticCurveTo(w * 0.16 - s, by - h * 0.18, w * 0.2 - s, by - h * 0.12);
+    cx.lineTo(w * 0.22 - s, by);
     cx.closePath();
     cx.fill();
 
-    // Lighter face
-    cx.fillStyle = C.mountainLight;
+    // Table Mountain — very prominent flat top
+    const mtnGrad = cx.createLinearGradient(0, by - h * 0.3, 0, by);
+    mtnGrad.addColorStop(0, '#3a5a7a');
+    mtnGrad.addColorStop(0.3, '#2a4a6a');
+    mtnGrad.addColorStop(1, '#1a3050');
+    cx.fillStyle = mtnGrad;
     cx.beginPath();
-    cx.moveTo(w * 0.35 - scroll % 20, by - h * 0.2);
-    cx.lineTo(w * 0.55 - scroll % 20, by - h * 0.2);
-    cx.lineTo(w * 0.6 - scroll % 20, by);
-    cx.lineTo(w * 0.3 - scroll % 20, by);
+    cx.moveTo(w * 0.15 - s, by);
+    // Left slope up to plateau
+    cx.lineTo(w * 0.22 - s, by - h * 0.12);
+    cx.lineTo(w * 0.26 - s, by - h * 0.25);
+    // FLAT TOP — the defining feature
+    cx.lineTo(w * 0.58 - s, by - h * 0.25);
+    // Right slope down from plateau
+    cx.lineTo(w * 0.62 - s, by - h * 0.12);
+    cx.lineTo(w * 0.68 - s, by);
     cx.closePath();
     cx.fill();
+
+    // Lighter cliff face on Table Mountain
+    cx.fillStyle = 'rgba(120,150,180,0.3)';
+    cx.beginPath();
+    cx.moveTo(w * 0.26 - s, by - h * 0.25);
+    cx.lineTo(w * 0.58 - s, by - h * 0.25);
+    cx.lineTo(w * 0.60 - s, by - h * 0.05);
+    cx.lineTo(w * 0.28 - s, by - h * 0.05);
+    cx.closePath();
+    cx.fill();
+
+    // "Tablecloth" subtle cloud wisps on top
+    cx.fillStyle = 'rgba(255,255,255,0.12)';
+    for (let i = 0; i < 4; i++) {
+      const cx2 = w * (0.3 + i * 0.07) - s;
+      const cy2 = by - h * 0.255;
+      cx.beginPath();
+      cx.ellipse(cx2, cy2, w * 0.04, h * 0.012, 0, 0, Math.PI * 2);
+      cx.fill();
+    }
+
+    // Devil's Peak — pointed peak on the right
+    cx.fillStyle = '#3a5878';
+    cx.beginPath();
+    cx.moveTo(w * 0.62 - s, by);
+    cx.lineTo(w * 0.68 - s, by - h * 0.12);
+    cx.lineTo(w * 0.74 - s, by - h * 0.28);
+    cx.lineTo(w * 0.82 - s, by - h * 0.10);
+    cx.lineTo(w * 0.88 - s, by);
+    cx.closePath();
+    cx.fill();
+
+    // Small hills on the far right
+    cx.fillStyle = '#4a6878';
+    cx.beginPath();
+    cx.moveTo(w * 0.85 - s, by);
+    cx.quadraticCurveTo(w * 0.92 - s, by - h * 0.06, w + 50, by);
+    cx.closePath();
+    cx.fill();
+
     cx.restore();
   }
 
@@ -570,7 +676,6 @@ class Game {
       const bh = 15 + (Math.sin(i * 2.3) * 0.5 + 0.5) * 40;
       cx.fillRect(x, by - bh, bw, bh + 5);
     }
-    // Lighter windows
     cx.fillStyle = C.cityLight;
     for (let i = 0; i < 30; i++) {
       const x = ((i * bw * 1.8 - scroll) % (w + bw * 2)) - bw;
@@ -589,7 +694,6 @@ class Game {
   drawRoad() {
     const { cx, w, h } = this;
 
-    // Road surface (trapezoid converging to vanish point)
     const topW = this.roadWidth * 0.15;
     const botW = this.roadWidth * 1.1;
     const vx = w / 2;
@@ -603,7 +707,6 @@ class Game {
     cx.closePath();
     cx.fill();
 
-    // Road edge lines
     cx.strokeStyle = C.roadLine;
     cx.lineWidth = 2;
     cx.beginPath();
@@ -615,7 +718,6 @@ class Game {
     cx.lineTo(vx + botW / 2, h);
     cx.stroke();
 
-    // Lane dividers
     for (let l = 1; l < LANE_COUNT; l++) {
       const ratio = l / LANE_COUNT;
       cx.strokeStyle = 'rgba(240,192,64,0.5)';
@@ -630,7 +732,7 @@ class Game {
       cx.setLineDash([]);
     }
 
-    // Diamond tiles on road for isometric feel
+    // Diamond tiles
     const tileScroll = this.bgScroll[2] * 0.5;
     cx.save();
     for (const tile of this.tiles) {
@@ -644,7 +746,6 @@ class Game {
 
       cx.strokeStyle = `rgba(240,192,64,${0.12 * depth})`;
       cx.lineWidth = 1;
-      // Draw diamond across road
       for (let lane = 0; lane < LANE_COUNT; lane++) {
         const laneRatio = (lane + 0.5) / LANE_COUNT;
         const lx = vx - rw / 2 + rw * laneRatio;
@@ -662,34 +763,28 @@ class Game {
 
   // ─── GAME OBJECTS ───
   drawGameObjects() {
-    // Collect all objects with depth for y-sorting
     const objects = [];
 
-    // Obstacles
     for (const ob of this.obstacles) {
       const depth = 1 - ob.z / 30;
       if (depth < 0 || depth > 1.1) continue;
       objects.push({ type: 'obstacle', data: ob, depth });
     }
 
-    // Passengers
     for (const p of this.passengers_pool) {
       const depth = 1 - p.z / 30;
       if (depth < 0 || depth > 1.1) continue;
       objects.push({ type: 'passenger', data: p, depth });
     }
 
-    // Powerups
     for (const pu of this.powerups) {
       const depth = 1 - pu.z / 30;
       if (depth < 0 || depth > 1.1) continue;
       objects.push({ type: 'powerup', data: pu, depth });
     }
 
-    // Player taxi
     objects.push({ type: 'player', depth: 0.92 });
 
-    // Sort by depth (far first)
     objects.sort((a, b) => a.depth - b.depth);
 
     for (const obj of objects) {
@@ -700,7 +795,7 @@ class Game {
     }
   }
 
-  // ─── TAXI ───
+  // ─── TAXI (SA Minibus — white with blue trim) ───
   drawTaxi() {
     const { cx, w, h } = this;
     const perspective = 0.85;
@@ -708,14 +803,14 @@ class Game {
     const px = w / 2 + (this.laneX - 1) * (rw / LANE_COUNT);
     let py = this.playerY;
 
-    // Jump arc
     if (this.jumping) {
       py -= Math.sin(this.jumpT * Math.PI) * 60;
     }
 
-    const sc = 0.85;
-    const tw = 44 * sc; // taxi width
-    const th = 60 * sc; // taxi height
+    const sc = 1.0;
+    const tw = 48 * sc; // wider — van shape
+    const th = 70 * sc; // taller — minibus
+    const isoDepth = 20 * sc; // isometric depth
 
     cx.save();
     cx.translate(px, py);
@@ -723,88 +818,126 @@ class Game {
     // Shadow
     cx.fillStyle = 'rgba(0,0,0,0.3)';
     cx.beginPath();
-    cx.ellipse(0, 20 * sc, tw * 0.7, 10 * sc, 0, 0, Math.PI * 2);
+    cx.ellipse(0, 22 * sc, tw * 0.8, 12 * sc, 0, 0, Math.PI * 2);
     cx.fill();
 
-    // Body — isometric box shape
-    // Bottom face
-    const bx = -tw / 2, by = -th * 0.2;
-    cx.fillStyle = C.taxiDark;
+    const bx = -tw / 2, by = -th * 0.15;
+
+    // Front face (facing us) — white body
+    cx.fillStyle = '#e8e8e8';
     cx.beginPath();
-    cx.moveTo(bx, by);
-    cx.lineTo(0, by + 18 * sc);
-    cx.lineTo(tw / 2, by);
-    cx.lineTo(0, by - 18 * sc);
+    cx.moveTo(-tw / 2 + 2, by + isoDepth);
+    cx.lineTo(tw / 2 - 2, by + isoDepth);
+    cx.lineTo(tw / 2 - 2, by + isoDepth - th);
+    cx.lineTo(-tw / 2 + 2, by + isoDepth - th);
     cx.closePath();
     cx.fill();
 
-    // Left face
-    cx.fillStyle = C.taxi;
+    // Blue trim stripe across front
+    cx.fillStyle = C.taxiBlue;
+    cx.fillRect(-tw / 2 + 2, by + isoDepth - th * 0.35, tw - 4, th * 0.08);
+
+    // Left face — slightly darker white
+    cx.fillStyle = '#d0d0d0';
     cx.beginPath();
     cx.moveTo(bx, by);
-    cx.lineTo(0, by + 18 * sc);
-    cx.lineTo(0, by + 18 * sc - th);
+    cx.lineTo(-tw / 2 + 2, by + isoDepth);
+    cx.lineTo(-tw / 2 + 2, by + isoDepth - th);
     cx.lineTo(bx, by - th);
     cx.closePath();
     cx.fill();
 
+    // Blue stripe on left side
+    cx.fillStyle = C.taxiBlue;
+    cx.beginPath();
+    const stripeY = by - th * 0.35;
+    cx.moveTo(bx, stripeY);
+    cx.lineTo(-tw / 2 + 2, stripeY + isoDepth * 0.3);
+    cx.lineTo(-tw / 2 + 2, stripeY + isoDepth * 0.3 + th * 0.08);
+    cx.lineTo(bx, stripeY + th * 0.08);
+    cx.closePath();
+    cx.fill();
+
     // Right face
-    cx.fillStyle = C.taxiLight;
+    cx.fillStyle = '#c8c8c8';
     cx.beginPath();
     cx.moveTo(tw / 2, by);
-    cx.lineTo(0, by + 18 * sc);
-    cx.lineTo(0, by + 18 * sc - th);
+    cx.lineTo(tw / 2 - 2, by + isoDepth);
+    cx.lineTo(tw / 2 - 2, by + isoDepth - th);
     cx.lineTo(tw / 2, by - th);
     cx.closePath();
     cx.fill();
 
-    // Top face
-    cx.fillStyle = C.taxi;
+    // Blue stripe on right side
+    cx.fillStyle = C.taxiBlue;
+    cx.beginPath();
+    cx.moveTo(tw / 2, stripeY);
+    cx.lineTo(tw / 2 - 2, stripeY + isoDepth * 0.3);
+    cx.lineTo(tw / 2 - 2, stripeY + isoDepth * 0.3 + th * 0.08);
+    cx.lineTo(tw / 2, stripeY + th * 0.08);
+    cx.closePath();
+    cx.fill();
+
+    // Top face — white
+    cx.fillStyle = '#f5f5f5';
     cx.beginPath();
     cx.moveTo(bx, by - th);
-    cx.lineTo(0, by - 18 * sc - th);
+    cx.lineTo(-tw / 2 + 2, by + isoDepth - th);
+    cx.lineTo(tw / 2 - 2, by + isoDepth - th);
     cx.lineTo(tw / 2, by - th);
-    cx.lineTo(0, by + 18 * sc - th);
     cx.closePath();
     cx.fill();
 
-    // Windows (dark strips on left face)
-    cx.fillStyle = 'rgba(30,60,100,0.8)';
-    const winY = by - th * 0.65;
-    cx.beginPath();
-    cx.moveTo(bx + 4, winY + 4);
-    cx.lineTo(-2, winY + 12 * sc + 4);
-    cx.lineTo(-2, winY + 12 * sc - 10);
-    cx.lineTo(bx + 4, winY - 6);
-    cx.closePath();
-    cx.fill();
+    // Windshield (large, front face)
+    cx.fillStyle = 'rgba(30,60,100,0.75)';
+    const winTop = by + isoDepth - th * 0.92;
+    const winBot = by + isoDepth - th * 0.45;
+    cx.fillRect(-tw / 2 + 6, winTop, tw - 12, winBot - winTop);
 
-    // Windows right face
-    cx.fillStyle = 'rgba(50,80,120,0.7)';
-    cx.beginPath();
-    cx.moveTo(tw / 2 - 4, winY + 4);
-    cx.lineTo(2, winY + 12 * sc + 4);
-    cx.lineTo(2, winY + 12 * sc - 10);
-    cx.lineTo(tw / 2 - 4, winY - 6);
-    cx.closePath();
-    cx.fill();
+    // Side windows (left)
+    cx.fillStyle = 'rgba(40,70,110,0.7)';
+    const swTop = by - th * 0.85;
+    const swH = th * 0.35;
+    for (let i = 0; i < 3; i++) {
+      const wy = swTop + (swH + 4) * 0 + i * 0; // single row
+      cx.beginPath();
+      const yOff = i * th * 0.13;
+      cx.moveTo(bx + 3, by - th * 0.82 + yOff);
+      cx.lineTo(-tw / 2 + 4, by + isoDepth - th * 0.82 + yOff);
+      cx.lineTo(-tw / 2 + 4, by + isoDepth - th * 0.68 + yOff);
+      cx.lineTo(bx + 3, by - th * 0.68 + yOff);
+      cx.closePath();
+      cx.fill();
+    }
 
-    // Wheels (small dark ellipses)
+    // Side windows (right)
+    for (let i = 0; i < 3; i++) {
+      const yOff = i * th * 0.13;
+      cx.beginPath();
+      cx.moveTo(tw / 2 - 3, by - th * 0.82 + yOff);
+      cx.lineTo(tw / 2 - 4, by + isoDepth - th * 0.82 + yOff);
+      cx.lineTo(tw / 2 - 4, by + isoDepth - th * 0.68 + yOff);
+      cx.lineTo(tw / 2 - 3, by - th * 0.68 + yOff);
+      cx.closePath();
+      cx.fill();
+    }
+
+    // Wheels
     cx.fillStyle = '#222';
     cx.beginPath();
-    cx.ellipse(bx + 6, by - 2, 5 * sc, 3 * sc, 0.3, 0, Math.PI * 2);
+    cx.ellipse(bx + 8, by + isoDepth * 0.8, 6 * sc, 4 * sc, 0.3, 0, Math.PI * 2);
     cx.fill();
     cx.beginPath();
-    cx.ellipse(tw / 2 - 6, by - 2, 5 * sc, 3 * sc, -0.3, 0, Math.PI * 2);
+    cx.ellipse(tw / 2 - 8, by + isoDepth * 0.8, 6 * sc, 4 * sc, -0.3, 0, Math.PI * 2);
     cx.fill();
 
     // Headlights
     cx.fillStyle = '#ffe';
     cx.beginPath();
-    cx.ellipse(-8, by + 14 * sc - th * 0.05, 3, 2, 0, 0, Math.PI * 2);
+    cx.ellipse(-12, by + isoDepth - 4, 4, 3, 0, 0, Math.PI * 2);
     cx.fill();
     cx.beginPath();
-    cx.ellipse(8, by + 14 * sc - th * 0.05, 3, 2, 0, 0, Math.PI * 2);
+    cx.ellipse(12, by + isoDepth - 4, 4, 3, 0, 0, Math.PI * 2);
     cx.fill();
 
     // Shield effect
@@ -822,9 +955,9 @@ class Game {
     if (this.boosted) {
       cx.fillStyle = `hsl(${20 + Math.random() * 30}, 100%, ${50 + Math.random() * 30}%)`;
       cx.beginPath();
-      cx.moveTo(-6, by + 18 * sc);
-      cx.lineTo(6, by + 18 * sc);
-      cx.lineTo(0, by + 18 * sc + 15 + Math.random() * 10);
+      cx.moveTo(-8, by + isoDepth + 2);
+      cx.lineTo(8, by + isoDepth + 2);
+      cx.lineTo(0, by + isoDepth + 20 + Math.random() * 12);
       cx.closePath();
       cx.fill();
     }
@@ -832,85 +965,161 @@ class Game {
     cx.restore();
   }
 
-  // ─── OBSTACLES ───
+  // ─── OBSTACLES (properly sized) ───
   drawObstacle(ob, depth) {
     const { cx, w, h } = this;
     const perspective = 0.08 + depth * 0.92;
     const rw = this.roadWidth * perspective;
+    const lw = rw / LANE_COUNT; // lane width at this depth
     const x = w / 2 + (ob.lane - 1) * (rw / LANE_COUNT);
     const y = this.vanishY + depth * (this.h - this.vanishY);
-    const sc = perspective * 0.7;
 
     cx.save();
     cx.translate(x, y);
 
     if (ob.type === 'pothole') {
-      cx.fillStyle = 'rgba(0,0,0,0.5)';
+      // Pothole — dark oval, ~45% of lane width
+      const pw = lw * 0.45;
+      const ph = pw * 0.4; // elliptical
+
+      // Outer cracked edge
+      cx.fillStyle = '#2a2a2a';
       cx.beginPath();
-      cx.ellipse(0, 0, 18 * sc, 8 * sc, 0, 0, Math.PI * 2);
+      cx.ellipse(0, 0, pw * 0.6, ph * 0.6, 0, 0, Math.PI * 2);
       cx.fill();
-      cx.strokeStyle = 'rgba(80,80,80,0.6)';
-      cx.lineWidth = 1.5 * sc;
-      cx.stroke();
+
+      // Middle ring
+      cx.fillStyle = '#1a1a1a';
+      cx.beginPath();
+      cx.ellipse(0, 0, pw * 0.45, ph * 0.45, 0, 0, Math.PI * 2);
+      cx.fill();
+
+      // Dark center (the hole)
+      cx.fillStyle = '#050505';
+      cx.beginPath();
+      cx.ellipse(0, 0, pw * 0.3, ph * 0.3, 0, 0, Math.PI * 2);
+      cx.fill();
+
+      // Crack lines radiating out
+      cx.strokeStyle = '#3a3a3a';
+      cx.lineWidth = Math.max(1, perspective * 1.5);
+      for (let i = 0; i < 6; i++) {
+        const angle = (i / 6) * Math.PI * 2 + 0.3;
+        cx.beginPath();
+        cx.moveTo(Math.cos(angle) * pw * 0.3, Math.sin(angle) * ph * 0.3);
+        cx.lineTo(Math.cos(angle) * pw * 0.7, Math.sin(angle) * ph * 0.7);
+        cx.stroke();
+      }
+
     } else if (ob.type === 'car') {
-      // Isometric car box
-      const cw = 22 * sc, ch = 32 * sc;
+      // Car — proper 3D box, ~70% of lane width, same size as player taxi
+      const cw = lw * 0.7;
+      const ch = cw * 1.5; // taller
+      const cd = cw * 0.4; // iso depth
+      const colors = ob.colorSet;
+
       // Shadow
-      cx.fillStyle = 'rgba(0,0,0,0.25)';
+      cx.fillStyle = 'rgba(0,0,0,0.3)';
       cx.beginPath();
-      cx.ellipse(0, 8 * sc, cw * 0.7, 5 * sc, 0, 0, Math.PI * 2);
+      cx.ellipse(0, cd * 0.6, cw * 0.55, cd * 0.4, 0, 0, Math.PI * 2);
       cx.fill();
+
+      // Front face
+      cx.fillStyle = colors.left;
+      cx.beginPath();
+      cx.moveTo(-cw / 2 + 1, cd * 0.5);
+      cx.lineTo(cw / 2 - 1, cd * 0.5);
+      cx.lineTo(cw / 2 - 1, cd * 0.5 - ch);
+      cx.lineTo(-cw / 2 + 1, cd * 0.5 - ch);
+      cx.closePath();
+      cx.fill();
+
       // Left face
-      cx.fillStyle = ob.color;
+      cx.fillStyle = colors.right;
       cx.beginPath();
       cx.moveTo(-cw / 2, 0);
-      cx.lineTo(0, 8 * sc);
-      cx.lineTo(0, 8 * sc - ch);
+      cx.lineTo(-cw / 2 + 1, cd * 0.5);
+      cx.lineTo(-cw / 2 + 1, cd * 0.5 - ch);
       cx.lineTo(-cw / 2, -ch);
       cx.closePath();
       cx.fill();
+
       // Right face
-      cx.fillStyle = ob.color;
-      cx.globalAlpha = 0.7;
+      cx.fillStyle = colors.left;
+      cx.globalAlpha = 0.75;
       cx.beginPath();
       cx.moveTo(cw / 2, 0);
-      cx.lineTo(0, 8 * sc);
-      cx.lineTo(0, 8 * sc - ch);
+      cx.lineTo(cw / 2 - 1, cd * 0.5);
+      cx.lineTo(cw / 2 - 1, cd * 0.5 - ch);
       cx.lineTo(cw / 2, -ch);
       cx.closePath();
       cx.fill();
       cx.globalAlpha = 1;
-      // Top
-      cx.fillStyle = ob.color;
-      cx.globalAlpha = 0.9;
+
+      // Top face
+      cx.fillStyle = colors.top;
       cx.beginPath();
       cx.moveTo(-cw / 2, -ch);
-      cx.lineTo(0, -ch - 8 * sc);
+      cx.lineTo(-cw / 2 + 1, cd * 0.5 - ch);
+      cx.lineTo(cw / 2 - 1, cd * 0.5 - ch);
       cx.lineTo(cw / 2, -ch);
-      cx.lineTo(0, -ch + 8 * sc);
       cx.closePath();
       cx.fill();
-      cx.globalAlpha = 1;
+
+      // Windshield on front face
+      cx.fillStyle = 'rgba(30,60,100,0.7)';
+      const winW = cw * 0.7;
+      const winH = ch * 0.25;
+      cx.fillRect(-winW / 2, cd * 0.5 - ch * 0.9, winW, winH);
+
+      // Headlights / taillights (since we see the rear)
+      cx.fillStyle = '#ff3333';
+      cx.beginPath();
+      cx.ellipse(-cw * 0.3, cd * 0.5 - 3, 3 * perspective, 2 * perspective, 0, 0, Math.PI * 2);
+      cx.fill();
+      cx.beginPath();
+      cx.ellipse(cw * 0.3, cd * 0.5 - 3, 3 * perspective, 2 * perspective, 0, 0, Math.PI * 2);
+      cx.fill();
+
     } else if (ob.type === 'vendor') {
-      // Colorful umbrella + small figure
-      const us = 14 * sc;
+      // Vendor with umbrella — properly sized
+      const vs = lw * 0.35;
+      const us = vs * 0.8; // umbrella size
+
+      // Umbrella pole
       cx.fillStyle = '#8B4513';
-      cx.fillRect(-1.5 * sc, -25 * sc, 3 * sc, 25 * sc);
-      // Umbrella
+      cx.fillRect(-1.5 * perspective, -vs * 1.8, 3 * perspective, vs * 1.8);
+
+      // Umbrella — colorful semicircle
       cx.fillStyle = ob.color;
       cx.beginPath();
-      cx.arc(0, -25 * sc, us, Math.PI, 0);
+      cx.arc(0, -vs * 1.8, us, Math.PI, 0);
       cx.closePath();
       cx.fill();
-      // Person
+
+      // Umbrella stripes
+      cx.fillStyle = 'rgba(255,255,255,0.3)';
+      cx.beginPath();
+      cx.arc(0, -vs * 1.8, us, Math.PI, Math.PI + 0.5);
+      cx.lineTo(0, -vs * 1.8);
+      cx.closePath();
+      cx.fill();
+
+      // Person body
       cx.fillStyle = '#654321';
       cx.beginPath();
-      cx.ellipse(0, -3 * sc, 5 * sc, 7 * sc, 0, 0, Math.PI * 2);
+      cx.ellipse(0, -vs * 0.15, vs * 0.25, vs * 0.4, 0, 0, Math.PI * 2);
       cx.fill();
+
+      // Person head
       cx.fillStyle = '#543210';
       cx.beginPath();
-      cx.arc(0, -12 * sc, 4 * sc, 0, Math.PI * 2);
+      cx.arc(0, -vs * 0.7, vs * 0.2, 0, Math.PI * 2);
       cx.fill();
+
+      // Small table/goods
+      cx.fillStyle = '#8B6914';
+      cx.fillRect(-vs * 0.4, -vs * 0.05, vs * 0.8, vs * 0.15);
     }
 
     cx.restore();
@@ -928,20 +1137,16 @@ class Game {
     cx.save();
     cx.translate(x, y);
 
-    // Waving arm effect
     const wave = Math.sin(p.waveT) * 0.3;
 
-    // Body
     cx.fillStyle = '#e0a060';
     cx.beginPath();
     cx.ellipse(0, -4 * sc, 5 * sc, 8 * sc, 0, 0, Math.PI * 2);
     cx.fill();
-    // Head
     cx.fillStyle = '#d09050';
     cx.beginPath();
     cx.arc(0, -14 * sc, 4 * sc, 0, Math.PI * 2);
     cx.fill();
-    // Arm waving
     cx.strokeStyle = '#e0a060';
     cx.lineWidth = 2.5 * sc;
     cx.beginPath();
@@ -949,7 +1154,6 @@ class Game {
     cx.lineTo(12 * sc, (-14 + wave * 8) * sc);
     cx.stroke();
 
-    // Small taxi stop sign
     cx.fillStyle = C.gold;
     cx.fillRect(-8 * sc, -22 * sc, 2 * sc, 10 * sc);
     cx.fillRect(-12 * sc, -24 * sc, 10 * sc, 6 * sc);
@@ -970,7 +1174,6 @@ class Game {
     cx.save();
     cx.translate(x, y + bob);
 
-    // Glow
     const color = pu.type === 'shield' ? C.shield : C.boost;
     cx.fillStyle = color;
     cx.globalAlpha = 0.3 + Math.sin(this.time * 5) * 0.15;
@@ -979,11 +1182,9 @@ class Game {
     cx.fill();
     cx.globalAlpha = 1;
 
-    // Icon
     cx.fillStyle = color;
     cx.beginPath();
     if (pu.type === 'shield') {
-      // Shield shape
       cx.moveTo(0, -20 * sc);
       cx.lineTo(10 * sc, -14 * sc);
       cx.lineTo(10 * sc, -6 * sc);
@@ -992,7 +1193,6 @@ class Game {
       cx.lineTo(-10 * sc, -14 * sc);
       cx.closePath();
     } else {
-      // Lightning bolt
       cx.moveTo(-4 * sc, -20 * sc);
       cx.lineTo(4 * sc, -10 * sc);
       cx.lineTo(0, -10 * sc);
@@ -1043,7 +1243,6 @@ class Game {
     cx.font = 'bold 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     cx.textBaseline = 'top';
 
-    // Background panel
     const panelW = Math.min(320, w - 20);
     cx.fillStyle = C.hud;
     cx.beginPath();
@@ -1057,12 +1256,10 @@ class Game {
     const spdText = `${(this.speed * 12).toFixed(0)} km/h`;
     cx.fillText(spdText, 130, 18);
 
-    // Destination
     cx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
     cx.fillStyle = C.gold;
     cx.fillText(`→ ${this.destination}`, 130, 44);
 
-    // Power-up indicators
     if (this.shielded) {
       cx.fillStyle = C.shield;
       cx.fillText(`🛡 ${this.shieldTimer.toFixed(1)}s`, 22, 56);
@@ -1084,7 +1281,6 @@ class Game {
     cx.fillRect(0, 0, w, h);
     cx.globalAlpha = this.stateAlpha;
 
-    // Title
     cx.fillStyle = C.gold;
     cx.font = `bold ${Math.min(52, w * 0.09)}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
     cx.textAlign = 'center';
@@ -1092,14 +1288,12 @@ class Game {
     cx.fillText('CAPE TOWN', w / 2, h * 0.3);
     cx.fillText('TAXI RUNNER', w / 2, h * 0.3 + Math.min(56, w * 0.1));
 
-    // Pulsing tap to play
     const pulse = 0.6 + Math.sin(this.time * 3) * 0.4;
     cx.globalAlpha = this.stateAlpha * pulse;
     cx.fillStyle = '#fff';
     cx.font = `bold ${Math.min(24, w * 0.045)}px -apple-system, BlinkMacSystemFont, sans-serif`;
     cx.fillText('TAP TO PLAY', w / 2, h * 0.6);
 
-    // Controls hint
     cx.globalAlpha = this.stateAlpha * 0.5;
     cx.font = `${Math.min(16, w * 0.03)}px -apple-system, sans-serif`;
     cx.fillText('Swipe or Arrow Keys to move • Space to jump', w / 2, h * 0.7);
