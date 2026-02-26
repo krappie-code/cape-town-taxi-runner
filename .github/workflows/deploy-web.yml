@@ -49,27 +49,31 @@ jobs:
           godot --headless --import 2>&1 || true
           timeout 30 godot --headless --editor --quit 2>&1 || true
 
-      - name: Validate scripts
+      - name: Validate project
         run: |
           cd godot
-          godot --headless --check-only --script res://scenes/main.gd 2>&1 || true
-          godot --headless --check-only --script res://scenes/player.gd 2>&1 || true
-          godot --headless --check-only --script res://scripts/game_manager.gd 2>&1 || true
-          godot --headless --check-only --script res://scripts/input_handler.gd 2>&1 || true
-          godot --headless --check-only --script res://scripts/road_generator.gd 2>&1 || true
+          echo "=== Checking resources ==="
+          godot --headless --script res://scripts/export_check.gd 2>&1 || true
+          echo "=== Template check ==="
+          ls -la $HOME/.local/share/godot/export_templates/4.4.stable/web_nothreads* || echo "NO nothreads templates"
+          ls -la $HOME/.local/share/godot/export_templates/4.4.stable/web_debug* || echo "NO debug templates"
+          ls -la $HOME/.local/share/godot/export_templates/4.4.stable/web_release* || echo "NO release templates"
+          echo "=== Export preset ==="
+          cat export_presets.cfg
 
       - name: Export to HTML5
         run: |
           mkdir -p build/web
           cd godot
-          # List templates to verify
-          echo "Templates available:"
-          ls -la $HOME/.local/share/godot/export_templates/4.4.stable/web* || true
-          # Try export with verbose
-          godot --headless --verbose --export-release "Web" ../build/web/index.html 2>&1 || {
-            echo "Export failed, trying debug export..."
-            godot --headless --verbose --export-debug "Web" ../build/web/index.html 2>&1
-          }
+          godot --headless --export-release "Web" ../build/web/index.html 2>&1; EXIT=$?
+          if [ $EXIT -ne 0 ]; then
+            echo "=== Release export failed (exit $EXIT), trying debug ==="
+            godot --headless --export-debug "Web" ../build/web/index.html 2>&1 || true
+            echo "=== Checking if output was created anyway ==="
+            ls -la ../build/web/ || true
+          fi
+          # Verify output exists
+          test -f ../build/web/index.html
 
       - name: Add coi-serviceworker for SharedArrayBuffer
         run: |
