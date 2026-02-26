@@ -525,7 +525,7 @@ class Game {
 
   // ─── MOUNTAINS ───
   drawMountains() {
-    const { cx, w } = this;
+    const { cx, w, h } = this;
     const by = this.horizonY;
     const scroll = this.bgScroll[0] * 0.02;
 
@@ -559,7 +559,7 @@ class Game {
 
   // ─── CITY SKYLINE ───
   drawCitySkyline() {
-    const { cx, w } = this;
+    const { cx, w, h } = this;
     const by = this.horizonY + 5;
     const scroll = this.bgScroll[1] * 0.01;
 
@@ -702,7 +702,7 @@ class Game {
 
   // ─── TAXI ───
   drawTaxi() {
-    const { cx, w } = this;
+    const { cx, w, h } = this;
     const perspective = 0.85;
     const rw = this.roadWidth * perspective;
     const px = w / 2 + (this.laneX - 1) * (rw / LANE_COUNT);
@@ -834,7 +834,7 @@ class Game {
 
   // ─── OBSTACLES ───
   drawObstacle(ob, depth) {
-    const { cx, w } = this;
+    const { cx, w, h } = this;
     const perspective = 0.08 + depth * 0.92;
     const rw = this.roadWidth * perspective;
     const x = w / 2 + (ob.lane - 1) * (rw / LANE_COUNT);
@@ -918,7 +918,7 @@ class Game {
 
   // ─── PASSENGERS ───
   drawPassenger(p, depth) {
-    const { cx, w } = this;
+    const { cx, w, h } = this;
     const perspective = 0.08 + depth * 0.92;
     const rw = this.roadWidth * perspective;
     const x = w / 2 + (p.lane - 1) * (rw / LANE_COUNT) + 20 * perspective;
@@ -959,7 +959,7 @@ class Game {
 
   // ─── POWERUPS ───
   drawPowerup(pu, depth) {
-    const { cx, w } = this;
+    const { cx, w, h } = this;
     const perspective = 0.08 + depth * 0.92;
     const rw = this.roadWidth * perspective;
     const x = w / 2 + (pu.lane - 1) * (rw / LANE_COUNT);
@@ -1037,7 +1037,7 @@ class Game {
   // ─── HUD ───
   drawHUD() {
     if (this.state !== 'playing') return;
-    const { cx, w } = this;
+    const { cx, w, h } = this;
 
     cx.save();
     cx.font = 'bold 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
